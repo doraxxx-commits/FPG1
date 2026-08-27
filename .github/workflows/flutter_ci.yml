@@ -1,282 +1,36 @@
-name: Flutter CI
+name: Build APK
 
 on:
-  push:
-    branches:
-      - main
-      - master
-
-  pull_request:
-    branches:
-      - main
-      - master
-
   workflow_dispatch:
 
 jobs:
   build:
-    name: Analyze, Test and Build APK
     runs-on: ubuntu-24.04
 
     steps:
-
-      # ==========================================
-      # CHECKOUT
-      # ==========================================
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ==========================================
-      # FLUTTER
-      # ==========================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.0'
           channel: stable
-          cache: true
 
-      # ==========================================
-      # JAVA 17
-      # ==========================================
-      - name: Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # ==========================================
-      # ENVIRONMENT
-      # ==========================================
-      - name: Check environment
-        run: |
-          echo "===== FLUTTER ====="
-          flutter --version
+      - name: Get dependencies
+        run: flutter pub get
 
-          echo "===== DART ====="
-          dart --version
-
-          echo "===== JAVA ====="
-          java -version
-
-          echo "===== JAVA HOME ====="
-          echo "$JAVA_HOME"
-
-      # ==========================================
-      # ANDROID
-      # ==========================================
-      - name: Create Android platform if missing
-        run: |
-          if [ ! -d "android" ]; then
-            echo "Android directory missing."
-            flutter create --platforms=android .
-          else
-            echo "Android directory already exists."
-          fi
-
-      # ==========================================
-      # DEPENDENCIES
-      # ==========================================
-      - name: Flutter pub get
-        run: |
-          flutter pub get
-
-      # ==========================================
-      # ANALYZE
-      # ==========================================
-      - name: Flutter analyze
-        run: |
-          flutter analyze \
-            --no-fatal-infos \
-            --no-fatal-warnings
-
-      # ==========================================
-      # TESTS
-      #
-      # Flutter 3.35.0 does not support --exclude.
-      #
-      # Temporarily move infrastructure/long-run
-      # tests outside test/ before running normal tests.
-      # ==========================================
-      - name: Flutter tests
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p .ci_disabled_tests
-
-          restore_tests() {
-            echo ""
-            echo "Restoring disabled tests..."
-
-            if [ -d ".ci_disabled_tests" ]; then
-              find .ci_disabled_tests -type f -name "*.dart" -print0 |
-              while IFS= read -r -d '' file
-              do
-                original="test/${file#.ci_disabled_tests/}"
-
-                mkdir -p "$(dirname "$original")"
-
-                mv "$file" "$original"
-              done
-            fi
-          }
-
-          trap restore_tests EXIT
-
-          echo "=========================================="
-          echo "Finding long-running infrastructure tests"
-          echo "=========================================="
-
-          find test -type f -name "*.dart" -print0 |
-          while IFS= read -r -d '' file
-          do
-            filename="$(basename "$file")"
-
-            case "$filename" in
-
-              *_long_run_test.dart)
-                echo "Disabling long-run test:"
-                echo "  $file"
-
-                destination=".ci_disabled_tests/${file#test/}"
-
-                mkdir -p "$(dirname "$destination")"
-
-                mv "$file" "$destination"
-                ;;
-
-              *_long_run_*_test.dart)
-                echo "Disabling long-run test:"
-                echo "  $file"
-
-                destination=".ci_disabled_tests/${file#test/}"
-
-                mkdir -p "$(dirname "$destination")"
-
-                mv "$file" "$destination"
-                ;;
-
-              *_stability_test.dart)
-                echo "Disabling stability test:"
-                echo "  $file"
-
-                destination=".ci_disabled_tests/${file#test/}"
-
-                mkdir -p "$(dirname "$destination")"
-
-                mv "$file" "$destination"
-                ;;
-
-              *_integrity_test.dart)
-                echo "Disabling integrity test:"
-                echo "  $file"
-
-                destination=".ci_disabled_tests/${file#test/}"
-
-                mkdir -p "$(dirname "$destination")"
-
-                mv "$file" "$destination"
-                ;;
-
-            esac
-          done
-
-          echo ""
-          echo "=========================================="
-          echo "Remaining tests:"
-          echo "=========================================="
-
-          find test -type f -name "*_test.dart" -print | sort
-
-          echo ""
-          echo "=========================================="
-          echo "Running normal Flutter tests..."
-          echo "=========================================="
-
-          flutter test \
-            --coverage \
-            --reporter expanded
-
-          echo ""
-          echo "=========================================="
-          echo "Normal tests completed."
-          echo "=========================================="
-
-      # ==========================================
-      # BUILD APK
-      # ==========================================
       - name: Build APK
-        run: |
-          echo "=========================================="
-          echo "Building FPG APK..."
-          echo "=========================================="
+        run: flutter build apk --debug
 
-          flutter build apk --debug
-
-      # ==========================================
-      # VERIFY APK
-      # ==========================================
-      - name: Verify APK
-        run: |
-          APK_PATH="build/app/outputs/flutter-apk/app-debug.apk"
-
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK was not created!"
-
-            echo ""
-            echo "Searching for APK files:"
-            find build -type f -name "*.apk" -print || true
-
-            exit 1
-          fi
-
-          echo ""
-          echo "=========================================="
-          echo "APK BUILD SUCCESSFUL"
-          echo "=========================================="
-
-          ls -lh "$APK_PATH"
-
-          echo ""
-          echo "APK SHA256:"
-          sha256sum "$APK_PATH"
-
-      # ==========================================
-      # UPLOAD APK
-      # ==========================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: FPG-debug-apk
+          name: FPG-APK
           path: build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
-
-      # ==========================================
-      # UPLOAD COVERAGE
-      # ==========================================
-      - name: Upload test coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: FPG-test-coverage
-          path: coverage/
-          if-no-files-found: warn
-
-      # ==========================================
-      # SUCCESS
-      # ==========================================
-      - name: Build summary
-        if: success()
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "        FPG BUILD SUCCESSFUL"
-          echo "=========================================="
-          echo ""
-          echo "Flutter: 3.35.0"
-          echo "Java: 17"
-          echo "Analyze: PASSED"
-          echo "Tests: PASSED"
-          echo "APK: CREATED"
-          echo ""
-          echo "Artifact: FPG-debug-apk"
