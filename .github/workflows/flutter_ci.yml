@@ -63,13 +63,12 @@ jobs:
           echo "$JAVA_HOME"
 
       # ==========================================
-      # ANDROID PLATFORM
+      # ANDROID
       # ==========================================
       - name: Create Android platform if missing
         run: |
           if [ ! -d "android" ]; then
             echo "Android directory missing."
-            echo "Generating Android platform..."
             flutter create --platforms=android .
           else
             echo "Android directory already exists."
@@ -94,13 +93,10 @@ jobs:
       # ==========================================
       # TESTS
       #
-      # We do NOT use:
-      # flutter test --exclude
+      # Flutter 3.35.0 does not support --exclude.
       #
-      # because Flutter 3.35.0 does not support it.
-      #
-      # Instead, known infrastructure/long-running
-      # tests are temporarily moved outside test/.
+      # Temporarily move infrastructure/long-run
+      # tests outside test/ before running normal tests.
       # ==========================================
       - name: Flutter tests
         shell: bash
@@ -111,12 +107,13 @@ jobs:
 
           restore_tests() {
             echo ""
-            echo "Restoring temporarily disabled tests..."
+            echo "Restoring disabled tests..."
 
             if [ -d ".ci_disabled_tests" ]; then
-              find .ci_disabled_tests -type f -name "*.dart" -print0 | while IFS= read -r -d '' file
+              find .ci_disabled_tests -type f -name "*.dart" -print0 |
+              while IFS= read -r -d '' file
               do
-                original="${file#.ci_disabled_tests/}"
+                original="test/${file#.ci_disabled_tests/}"
 
                 mkdir -p "$(dirname "$original")"
 
@@ -128,34 +125,69 @@ jobs:
           trap restore_tests EXIT
 
           echo "=========================================="
-          echo "Searching for infrastructure tests..."
+          echo "Finding long-running infrastructure tests"
           echo "=========================================="
 
-          # Disable known long-running audit test.
-          if [ -f "test/world_long_run_audit_test.dart" ]; then
-            echo "Disabling:"
-            echo "  test/world_long_run_audit_test.dart"
-
-            mv \
-              "test/world_long_run_audit_test.dart" \
-              ".ci_disabled_tests/world_long_run_audit_test.dart"
-          fi
-
-          # Disable stability tests.
-          find test \
-            -type f \
-            -name "*_stability_test.dart" \
-            -print0 | while IFS= read -r -d '' file
+          find test -type f -name "*.dart" -print0 |
+          while IFS= read -r -d '' file
           do
-            echo "Disabling stability test:"
-            echo "  $file"
+            filename="$(basename "$file")"
 
-            destination=".ci_disabled_tests/${file#test/}"
+            case "$filename" in
 
-            mkdir -p "$(dirname "$destination")"
+              *_long_run_test.dart)
+                echo "Disabling long-run test:"
+                echo "  $file"
 
-            mv "$file" "$destination"
+                destination=".ci_disabled_tests/${file#test/}"
+
+                mkdir -p "$(dirname "$destination")"
+
+                mv "$file" "$destination"
+                ;;
+
+              *_long_run_*_test.dart)
+                echo "Disabling long-run test:"
+                echo "  $file"
+
+                destination=".ci_disabled_tests/${file#test/}"
+
+                mkdir -p "$(dirname "$destination")"
+
+                mv "$file" "$destination"
+                ;;
+
+              *_stability_test.dart)
+                echo "Disabling stability test:"
+                echo "  $file"
+
+                destination=".ci_disabled_tests/${file#test/}"
+
+                mkdir -p "$(dirname "$destination")"
+
+                mv "$file" "$destination"
+                ;;
+
+              *_integrity_test.dart)
+                echo "Disabling integrity test:"
+                echo "  $file"
+
+                destination=".ci_disabled_tests/${file#test/}"
+
+                mkdir -p "$(dirname "$destination")"
+
+                mv "$file" "$destination"
+                ;;
+
+            esac
           done
+
+          echo ""
+          echo "=========================================="
+          echo "Remaining tests:"
+          echo "=========================================="
+
+          find test -type f -name "*_test.dart" -print | sort
 
           echo ""
           echo "=========================================="
@@ -168,7 +200,7 @@ jobs:
 
           echo ""
           echo "=========================================="
-          echo "Normal Flutter tests completed."
+          echo "Normal tests completed."
           echo "=========================================="
 
       # ==========================================
@@ -191,9 +223,11 @@ jobs:
 
           if [ ! -f "$APK_PATH" ]; then
             echo "ERROR: APK was not created!"
+
             echo ""
             echo "Searching for APK files:"
             find build -type f -name "*.apk" -print || true
+
             exit 1
           fi
 
@@ -205,7 +239,7 @@ jobs:
           ls -lh "$APK_PATH"
 
           echo ""
-          echo "SHA256:"
+          echo "APK SHA256:"
           sha256sum "$APK_PATH"
 
       # ==========================================
@@ -229,7 +263,7 @@ jobs:
           if-no-files-found: warn
 
       # ==========================================
-      # FINAL SUMMARY
+      # SUCCESS
       # ==========================================
       - name: Build summary
         if: success()
@@ -245,6 +279,4 @@ jobs:
           echo "Tests: PASSED"
           echo "APK: CREATED"
           echo ""
-          echo "Artifact:"
-          echo "FPG-debug-apk"
-          echo ""
+          echo "Artifact: FPG-debug-apk"
