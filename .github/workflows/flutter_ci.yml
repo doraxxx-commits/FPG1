@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -28,7 +29,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install dependencies
+      - name: Create Android project
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=android .
+          fi
+
+      - name: Get dependencies
         run: flutter pub get
 
       - name: Build APK
